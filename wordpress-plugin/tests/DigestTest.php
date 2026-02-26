@@ -29,7 +29,7 @@ final class DigestTest extends TestCase
     {
         $result = $this->digest->forPage('https://example.com/hello-world/');
 
-        $this->assertRegExp('/^[0-9a-f]{64}$/', $result);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $result);
     }
 
     /** forPage() must be deterministic: same URL → same digest. */
@@ -56,7 +56,7 @@ final class DigestTest extends TestCase
     {
         $result = $this->digest->forGlobal();
 
-        $this->assertRegExp('/^[0-9a-f]{64}$/', $result);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $result);
     }
 
     /** forPost() returns a 64-char SHA-256 for an existing post. */
@@ -64,7 +64,7 @@ final class DigestTest extends TestCase
     {
         $result = $this->digest->forPost(42);
 
-        $this->assertRegExp('/^[0-9a-f]{64}$/', $result);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $result);
     }
 
     /** forPost() is deterministic: same post ID → same digest. */
@@ -82,6 +82,6 @@ final class DigestTest extends TestCase
         // Post ID 0 triggers the null branch in our stub.
         $result = $this->digest->forPost(0);
 
-        $this->assertRegExp('/^[0-9a-f]{64}$/', $result);
+        $this->assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $result);
     }
 }
