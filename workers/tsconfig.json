@@ -1,8 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "bundler",
+    "module": "ES2022",
+    "moduleResolution": "Bundler",
     "lib": ["ES2022"],
     "types": ["@cloudflare/workers-types"],
     "strict": true,
@@ -10,12 +10,14 @@
     "noImplicitOverride": true,
     "exactOptionalPropertyTypes": true,
     "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
     "outDir": "dist",
     "rootDir": ".",
     "resolveJsonModule": true,
     "esModuleInterop": false,
     "allowSyntheticDefaultImports": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "noEmit": true
   },
   "include": ["src/**/*.ts", "tests/**/*.ts"],
   "exclude": ["node_modules", "dist"]

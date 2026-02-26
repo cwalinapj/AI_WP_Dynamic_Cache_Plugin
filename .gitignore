@@ -1,5 +1,6 @@
 # Dependencies
 node_modules/
+workers/node_modules/
 vendor/
 
 # Build artifacts
@@ -12,6 +13,13 @@ wordpress-plugin/composer.lock
 # Sandbox results (generated)
 sandbox/results/*.json
 sandbox/results/*.md
+sandbox-results/
+
+# Cloudflare / Wrangler
+.wrangler/
+
+# WordPress dev
+.wp-env/
 
 # Environment files
 .env
@@ -25,3 +33,4 @@ sandbox/results/*.md
 # OS
 .DS_Store
 Thumbs.db
+*.log

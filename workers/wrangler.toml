@@ -1,9 +1,10 @@
-name = "ai-wp-dynamic-cache"
+name = "ai-wp-dynamic-cache-worker"
 main = "src/index.ts"
-compatibility_date = "2024-01-01"
+compatibility_date = "2026-02-26"
 
 [vars]
 ENVIRONMENT = "production"
+REPLAY_WINDOW_SECONDS = "300"
 
 [[kv_namespaces]]
 binding = "CACHE_TAGS"
