@@ -28,65 +28,70 @@ repo/
 
 ## Local development
 
-### WP-Env
-- Requires Node 20+ and Docker.
-- Plugin mounted from `./apps/webadmin-edge-agent`.
+WordPress dynamic cache plugin plus Cloudflare Worker control plane skeleton with sandbox benchmark scoring.
 
-```bash
-npm install -g @wordpress/env
-wp-env start
-```
+## Included now
 
-### Docker Compose
-- WordPress plugin mounted from `./apps/webadmin-edge-agent`.
+- Root WordPress plugin implementation:
+  - `ai-wp-dynamic-cache.php`
+- Modular plugin skeleton:
+  - `wordpress-plugin/ai-wp-dynamic-cache.php`
+  - `wordpress-plugin/src/Plugin.php`
+- Worker skeleton:
+  - `workers/src/index.ts`
+  - `workers/src/lib/scoring.ts`
+  - `workers/src/lib/signature.ts`
+  - `workers/src/db/schema.sql`
+- Docs:
+  - `docs/architecture.md`
+  - `docs/cache-keying.md`
+  - `docs/purge-and-tags.md`
+  - `docs/shared-loadtests.md`
+- Sandbox benchmarking scripts:
+  - `scripts/sandbox/k6-cache-benchmark.js`
+  - `scripts/sandbox/run-lighthouse.sh`
+  - `scripts/sandbox/share-loadtests.js`
 
-```bash
-docker compose up -d
-```
+## Scoring model implemented
 
-### Worker
+Hard gates (fail fast):
 
-```bash
-cd apps/control-plane-worker
-npm install
-npm run dev
-```
+- `digest_mismatch`
+- `personalized_cache_leak`
+- `purge_within_window` must be true
+- `cache_key_collision`
 
-### Analytics OAuth + Deploy setup
+Weighted score:
 
-Set worker secrets:
+- 60% latency score (p95-heavy)
+- 20% origin load score
+- 10% cache hit quality score
+- 10% purge MTTR score
 
-```bash
-cd apps/control-plane-worker
-wrangler secret put GOOGLE_CLIENT_ID
-wrangler secret put GOOGLE_CLIENT_SECRET
-wrangler secret put GOOGLE_OAUTH_REDIRECT_URI
-wrangler secret put CAP_TOKEN_ANALYTICS_WRITE
-```
+The Worker stores the selected per-site/per-VPS strategy profile in D1 (`strategy_profiles`) and returns the recommended strategy/TTL to the plugin.
 
-Worker callback:
-- `GET /oauth/google/callback`
+Shared optimization layer:
 
-WP Admin flow:
-1. Open `WebAdmin Edge Agent -> Analytics & Reporting`.
-2. Click `Generate Analytics API Key` and copy the one-time value.
-3. Set the same value in worker secret `CAP_TOKEN_ANALYTICS_WRITE`.
-4. Save GA4/GTM IDs, click `Connect Google Account`, then `Deploy GTM + GA4 Conversions`.
+- workers publish per-page load-test samples to D1 (`loadtest_samples`)
+- benchmark route adds a small strategy bonus using shared historical p95 data
+- plugin admin shows a shared page/strategy leaderboard to guide tuning
 
-## Wallet login verification
+## AI boundaries
 
-`plugins/ai-webadmin` now supports wallet-signature login for:
-- Ethereum (`personal_sign`)
-- Solana (`signMessage`)
+AI should be optional and advisory only:
 
-Worker endpoint:
-- `POST /plugin/wp/auth/wallet/verify`
+- classify route/template cache risk
+- prioritize preload under budget
+- summarize benchmark outcomes
+- suggest safe tuning changes
 
-The worker verifies signed requests and validates wallet signatures for both networks.
+Serving remains deterministic in Worker + plugin logic.
 
-## Sandbox Scheduler (Agent Voting)
+## Worker endpoints in skeleton
 
-Control-plane worker now supports sandbox queue orchestration with agent voting:
+- `POST /plugin/wp/cache/benchmark`
+- `GET /plugin/wp/cache/profile?site_id=...&vps_fingerprint=...`
+- `GET /edge/cache/*` (edge -> R2 -> origin cache chain skeleton)
 - `POST /plugin/wp/sandbox/request`
 - `POST /plugin/wp/sandbox/vote`
 - `POST /plugin/wp/sandbox/claim`
@@ -94,53 +99,80 @@ Control-plane worker now supports sandbox queue orchestration with agent voting:
 - `POST /plugin/wp/sandbox/conflicts/report`
 - `POST /plugin/wp/sandbox/conflicts/list`
 - `POST /plugin/wp/sandbox/conflicts/resolve`
+- `POST /plugin/wp/sandbox/loadtests/report`
+- `POST /plugin/wp/sandbox/loadtests/shared`
 
-Selection order is weighted by:
-- request priority
-- summed agent votes
-- queue age (anti-starvation boost)
-
-Claims are serialized with a Durable Object lock so multiple agents do not claim the same sandbox slot.
-Agents can also share a conflict pool for blocked work, read active conflicts, and resolve/dismiss them after remediation.
-All sandbox routes use signed plugin auth and require capability token `CAP_TOKEN_SANDBOX_WRITE`.
-
-## Tests
-
-### Worker tests (includes Ethereum + Solana wallet verify tests)
+## Build plugin zip
 
 ```bash
-cd apps/control-plane-worker
-npm test
+bash scripts/build-plugin-zip.sh
 ```
 
-### Edge agent PHP tests
+Output:
+
+- `dist/ai-wp-dynamic-cache-plugin.zip`
+
+## Worker setup
 
 ```bash
-cd apps/webadmin-edge-agent
-composer install
-composer test
+cd workers
+npm install
+npm run build
 ```
 
-## Build installable edge-agent zip
+Then set real values in `workers/wrangler.toml`:
+
+- `database_id`
+- `ORIGIN_BASE_URL`
+- secrets:
+  - `WP_PLUGIN_SHARED_SECRET`
+  - `CAP_TOKEN_SANDBOX_WRITE` (for sandbox routes)
+
+## Sandbox benchmark scripts
+
+Run k6 against a target:
 
 ```bash
-./scripts/build-webadmin-edge-agent-zip.sh
+k6 run scripts/sandbox/k6-cache-benchmark.js -e TARGET_URL=https://your-site.example
 ```
 
-Artifact:
-- `apps/webadmin-edge-agent/dist/webadmin-edge-agent.zip`
+Run Lighthouse profile:
 
-## CI
+```bash
+bash scripts/sandbox/run-lighthouse.sh https://your-site.example sandbox-results
+```
 
-GitHub Actions workflow:
-- Runs worker tests (including Ethereum/Solana wallet-login verification path).
-- Runs WordPress edge-agent PHPUnit suite.
-- Runs PHP lint for `plugins/ai-webadmin` and `plugins/tolldns`.
+Publish shared per-page tests from each worker:
 
-## GitHub repo rename
+```bash
+cat > sandbox-results/page-tests.json <<'JSON'
+[
+  {
+    "url": "https://your-site.example/",
+    "p50_latency_ms": 120,
+    "p95_latency_ms": 260,
+    "p99_latency_ms": 420,
+    "origin_cpu_pct": 42,
+    "origin_query_count": 34,
+    "edge_hit_ratio": 0.88,
+    "r2_hit_ratio": 0.44,
+    "purge_mttr_ms": 380,
+    "gates": {
+      "digest_mismatch": false,
+      "personalized_cache_leak": false,
+      "purge_within_window": true,
+      "cache_key_collision": false
+    }
+  }
+]
+JSON
 
-If you want the GitHub repository slug renamed from a web3-specific name, do it in:
-- GitHub -> Repository -> `Settings` -> `General` -> `Repository name`
-
-Suggested neutral name:
-- `wp-admin-plugin-suite`
+WORKER_BASE_URL=https://worker.example \
+WP_PLUGIN_SHARED_SECRET=... \
+CAP_TOKEN_SANDBOX_WRITE=... \
+SITE_ID=site-1 \
+WORKER_ID=edge-worker-a \
+PLUGIN_ID=site-1 \
+LOADTEST_FILE=sandbox-results/page-tests.json \
+node scripts/sandbox/share-loadtests.js
+```

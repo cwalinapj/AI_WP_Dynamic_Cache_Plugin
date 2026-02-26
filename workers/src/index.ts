@@ -1,5 +1,5 @@
 import type { BenchmarkRequestPayload, Env, StrategyCandidateInput } from './lib/types';
-import { evaluateCandidates } from './lib/scoring';
+import { evaluateCandidate, evaluateCandidates } from './lib/scoring';
 import { verifySignedRequest } from './lib/signature';
 
 export default {
@@ -38,16 +38,20 @@ async function handleBenchmark(request: Request, env: Env, path: string): Promis
     return json({ ok: false, error: parsed.error }, 400);
   }
 
-  return persistBenchmarkProfile(auth.pluginId, parsed.payload, env);
-}
+  const result = evaluateCandidates(parsed.payload.candidates);
+  const sharedBonuses = await loadSharedStrategyBonuses(env, parsed.payload.site_id);
+  const ranked = result.evaluated
+    .filter((entry) => entry.hard_gate_passed)
+    .map((entry) => ({
+      entry,
+      shared_bonus: sharedBonuses[entry.candidate.strategy] ?? 0,
+      final_score: entry.score + (sharedBonuses[entry.candidate.strategy] ?? 0),
+    }))
+    .sort((left, right) => right.final_score - left.final_score);
 
-type ResolvedBenchmarkPayload = Required<Pick<BenchmarkRequestPayload, 'site_id' | 'vps_fingerprint' | 'candidates'>> &
-  BenchmarkRequestPayload;
-
-async function persistBenchmarkProfile(pluginId: string, payload: ResolvedBenchmarkPayload, env: Env): Promise<Response> {
-  const result = evaluateCandidates(payload.candidates);
   const nowIso = new Date().toISOString();
-  const chosen = result.recommended;
+  const chosenRanked = ranked[0] ?? null;
+  const chosen = chosenRanked?.entry ?? null;
 
   if (!chosen) {
     return json(
@@ -61,6 +65,8 @@ async function persistBenchmarkProfile(pluginId: string, payload: ResolvedBenchm
   }
 
   const profileId = crypto.randomUUID();
+  const vpsFingerprint = parsed.payload.vps_fingerprint;
+
   await env.DB.prepare(
     `INSERT INTO strategy_profiles (
       id, plugin_id, site_id, vps_fingerprint, strategy, ttl_seconds, score,
@@ -83,19 +89,19 @@ async function persistBenchmarkProfile(pluginId: string, payload: ResolvedBenchm
   )
     .bind(
       profileId,
-      pluginId,
-      payload.site_id,
-      payload.vps_fingerprint,
+      auth.pluginId,
+      parsed.payload.site_id,
+      vpsFingerprint,
       chosen.candidate.strategy,
       chosen.candidate.ttl_seconds,
-      chosen.score,
+      chosenRanked?.final_score ?? chosen.score,
       chosen.components.latency,
       chosen.components.origin_load,
       chosen.components.cache_hit_quality,
       chosen.components.purge_mttr,
       JSON.stringify(chosen.hard_gate_failures),
       JSON.stringify(chosen.candidate.metrics),
-      payload.ai_summary,
+      parsed.payload.ai_summary,
       nowIso,
       nowIso,
     )
@@ -104,12 +110,18 @@ async function persistBenchmarkProfile(pluginId: string, payload: ResolvedBenchm
   return json(
     {
       ok: true,
-      site_id: payload.site_id,
-      vps_fingerprint: payload.vps_fingerprint,
+      site_id: parsed.payload.site_id,
+      vps_fingerprint: vpsFingerprint,
       recommended_strategy: chosen.candidate.strategy,
       ttl_seconds: chosen.candidate.ttl_seconds,
-      score: chosen.score,
+      score: chosenRanked?.final_score ?? chosen.score,
       components: chosen.components,
+      shared_bonus: chosenRanked?.shared_bonus ?? 0,
+      strategy_shared_bonuses: sharedBonuses,
+      notes:
+        (chosenRanked?.shared_bonus ?? 0) > 0
+          ? `applied_shared_bonus_${(chosenRanked?.shared_bonus ?? 0).toFixed(4)}`
+          : 'shared_bonus_not_applied',
       rejected_candidates: result.evaluated
         .filter((entry) => !entry.hard_gate_passed)
         .map((entry) => ({
@@ -119,7 +131,8 @@ async function persistBenchmarkProfile(pluginId: string, payload: ResolvedBenchm
       profile: {
         strategy: chosen.candidate.strategy,
         ttl_seconds: chosen.candidate.ttl_seconds,
-        score: chosen.score,
+        score: chosenRanked?.final_score ?? chosen.score,
+        shared_bonus: chosenRanked?.shared_bonus ?? 0,
         persisted_at: nowIso,
       },
     },
@@ -149,40 +162,14 @@ async function handleSandbox(request: Request, env: Env, path: string): Promise<
   if (path === '/plugin/wp/sandbox/conflicts/resolve') {
     return handleSandboxConflictResolve(request, env, path);
   }
-  if (path === '/plugin/wp/sandbox/metrics/ingest') {
-    return handleSandboxMetricsIngest(request, env, path);
+  if (path === '/plugin/wp/sandbox/loadtests/report') {
+    return handleSandboxLoadtestReport(request, env, path);
+  }
+  if (path === '/plugin/wp/sandbox/loadtests/shared') {
+    return handleSandboxLoadtestShared(request, env, path);
   }
 
   return json({ ok: false, error: 'sandbox_route_not_found' }, 404);
-}
-
-async function handleSandboxMetricsIngest(request: Request, env: Env, path: string): Promise<Response> {
-  const auth = await authorizeMutation(request, env, path);
-  if (!auth.ok) {
-    return auth.response;
-  }
-
-  const siteId = asString(auth.body.site_id);
-  if (!siteId) {
-    return json({ ok: false, error: 'missing_site_id' }, 400);
-  }
-
-  const candidates = buildCandidatesFromSandboxMetrics(auth.body);
-  if (candidates.length < 1) {
-    return json({ ok: false, error: 'no_candidates_derived' }, 400);
-  }
-
-  const payload: ResolvedBenchmarkPayload = {
-    site_id: siteId,
-    site_url: asString(auth.body.site_url) || undefined,
-    current_strategy: asString(auth.body.current_strategy) || 'edge-balanced',
-    current_ttl_seconds: clampInt(auth.body.current_ttl_seconds, 30, 86400, 300),
-    ai_summary: asString(auth.body.ai_summary)?.slice(0, 1000),
-    vps_fingerprint: asString(auth.body.vps_fingerprint)?.slice(0, 180) || `vps-${hashSiteId(siteId)}`,
-    candidates,
-  };
-
-  return persistBenchmarkProfile(auth.pluginId, payload, env);
 }
 
 async function handleSandboxRequest(request: Request, env: Env, path: string): Promise<Response> {
@@ -611,6 +598,288 @@ async function handleSandboxConflictResolve(
   );
 }
 
+async function handleSandboxLoadtestReport(
+  request: Request,
+  env: Env,
+  path: string,
+): Promise<Response> {
+  const auth = await authorizeMutation(request, env, path);
+  if (!auth.ok) {
+    return auth.response;
+  }
+
+  const siteId = asString(auth.body.site_id);
+  if (!siteId) {
+    return json({ ok: false, error: 'missing_site_id' }, 400);
+  }
+
+  const workerIdRaw =
+    asString(auth.body.worker_id) || asString(auth.body.agent_id) || `${auth.pluginId}-worker`;
+  const workerId = workerIdRaw.slice(0, 120);
+  const defaultStrategy = normalizeStrategy(asString(auth.body.strategy) || 'edge-balanced');
+  const rawSamples = Array.isArray(auth.body.page_tests)
+    ? auth.body.page_tests
+    : Array.isArray(auth.body.samples)
+      ? auth.body.samples
+      : [];
+
+  if (rawSamples.length < 1) {
+    return json({ ok: false, error: 'missing_page_tests' }, 400);
+  }
+
+  const nowIso = new Date().toISOString();
+  let inserted = 0;
+  let hardFailed = 0;
+
+  for (const raw of rawSamples) {
+    if (!raw || typeof raw !== 'object') {
+      continue;
+    }
+
+    const sample = raw as Record<string, unknown>;
+    const urlValue = asString(sample.page_url) || asString(sample.url);
+    const pagePath = derivePagePath(urlValue, asString(sample.page_path));
+    if (!pagePath) {
+      continue;
+    }
+
+    const metrics = (sample.metrics ?? sample) as Record<string, unknown>;
+    const gates = sample.gates && typeof sample.gates === 'object'
+      ? (sample.gates as Record<string, unknown>)
+      : {};
+
+    const candidate = {
+      strategy: normalizeStrategy(asString(sample.strategy) || defaultStrategy),
+      ttl_seconds: clampInt(sample.ttl_seconds, 30, 86400, 300),
+      metrics: {
+        p50_latency_ms: numberOr(metrics.p50_latency_ms, 300),
+        p95_latency_ms: numberOr(metrics.p95_latency_ms, 700),
+        p99_latency_ms: numberOr(metrics.p99_latency_ms, 1300),
+        origin_cpu_pct: numberOr(metrics.origin_cpu_pct, 60),
+        origin_query_count: numberOr(metrics.origin_query_count, 90),
+        edge_hit_ratio: numberOr(metrics.edge_hit_ratio, 0.5),
+        r2_hit_ratio: numberOr(metrics.r2_hit_ratio, 0.2),
+        purge_mttr_ms: numberOr(metrics.purge_mttr_ms, 1500),
+      },
+      gates: {
+        digest_mismatch: asBool(gates.digest_mismatch),
+        personalized_cache_leak: asBool(gates.personalized_cache_leak),
+        purge_within_window:
+          gates.purge_within_window === undefined ? true : asBool(gates.purge_within_window),
+        cache_key_collision: asBool(gates.cache_key_collision),
+      },
+    } satisfies StrategyCandidateInput;
+
+    const evaluated = evaluateCandidate(candidate);
+    if (!evaluated.hard_gate_passed) {
+      hardFailed += 1;
+    }
+
+    const row = {
+      id: crypto.randomUUID(),
+      plugin_id: auth.pluginId,
+      site_id: siteId,
+      worker_id: workerId,
+      page_url: urlValue || pagePath,
+      page_path: pagePath,
+      strategy: candidate.strategy,
+      p50_latency_ms: candidate.metrics.p50_latency_ms,
+      p95_latency_ms: candidate.metrics.p95_latency_ms,
+      p99_latency_ms: candidate.metrics.p99_latency_ms,
+      origin_cpu_pct: candidate.metrics.origin_cpu_pct,
+      origin_query_count: candidate.metrics.origin_query_count,
+      edge_hit_ratio: candidate.metrics.edge_hit_ratio,
+      r2_hit_ratio: candidate.metrics.r2_hit_ratio ?? null,
+      purge_mttr_ms: candidate.metrics.purge_mttr_ms,
+      hard_gate_passed: evaluated.hard_gate_passed ? 1 : 0,
+      hard_gate_failures_json: JSON.stringify(evaluated.hard_gate_failures),
+      score: evaluated.score,
+      created_at: nowIso,
+    };
+
+    await env.DB.prepare(
+      `INSERT INTO loadtest_samples (
+         id, plugin_id, site_id, worker_id, page_url, page_path, strategy,
+         p50_latency_ms, p95_latency_ms, p99_latency_ms,
+         origin_cpu_pct, origin_query_count, edge_hit_ratio, r2_hit_ratio,
+         purge_mttr_ms, hard_gate_passed, hard_gate_failures_json, score, created_at
+       ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)`,
+    )
+      .bind(
+        row.id,
+        row.plugin_id,
+        row.site_id,
+        row.worker_id,
+        row.page_url,
+        row.page_path,
+        row.strategy,
+        row.p50_latency_ms,
+        row.p95_latency_ms,
+        row.p99_latency_ms,
+        row.origin_cpu_pct,
+        row.origin_query_count,
+        row.edge_hit_ratio,
+        row.r2_hit_ratio,
+        row.purge_mttr_ms,
+        row.hard_gate_passed,
+        row.hard_gate_failures_json,
+        row.score,
+        row.created_at,
+      )
+      .run();
+    inserted += 1;
+  }
+
+  if (inserted < 1) {
+    return json({ ok: false, error: 'no_valid_page_tests' }, 400);
+  }
+
+  return json(
+    {
+      ok: true,
+      site_id: siteId,
+      worker_id: workerId,
+      inserted,
+      hard_gate_failed: hardFailed,
+    },
+    201,
+  );
+}
+
+async function handleSandboxLoadtestShared(
+  request: Request,
+  env: Env,
+  path: string,
+): Promise<Response> {
+  const auth = await authorizeMutation(request, env, path);
+  if (!auth.ok) {
+    return auth.response;
+  }
+
+  const siteId = asString(auth.body.site_id);
+  if (!siteId) {
+    return json({ ok: false, error: 'missing_site_id' }, 400);
+  }
+
+  const limit = clampInt(auth.body.limit, 1, 500, 200);
+  const strategy = asString(auth.body.strategy);
+  const pagePath = asString(auth.body.page_path);
+  const onlyPassing = auth.body.only_passing === undefined ? true : asBool(auth.body.only_passing);
+
+  const whereParts = ['site_id = ?1'];
+  const params: unknown[] = [siteId];
+
+  if (strategy) {
+    whereParts.push(`strategy = ?${params.length + 1}`);
+    params.push(normalizeStrategy(strategy));
+  }
+  if (pagePath) {
+    whereParts.push(`page_path = ?${params.length + 1}`);
+    params.push(pagePath);
+  }
+  if (onlyPassing) {
+    whereParts.push('hard_gate_passed = 1');
+  }
+
+  const whereClause = whereParts.join(' AND ');
+  const byPageQuery = `SELECT
+      page_path,
+      strategy,
+      COUNT(*) AS sample_count,
+      AVG(p95_latency_ms) AS avg_p95_latency_ms,
+      AVG(edge_hit_ratio) AS avg_edge_hit_ratio,
+      AVG(COALESCE(r2_hit_ratio, 0)) AS avg_r2_hit_ratio,
+      AVG(score) AS avg_score,
+      AVG(hard_gate_passed) AS pass_ratio,
+      MAX(created_at) AS last_seen_at
+    FROM loadtest_samples
+    WHERE ${whereClause}
+    GROUP BY page_path, strategy
+    ORDER BY avg_score DESC, sample_count DESC
+    LIMIT ${limit}`;
+
+  const byStrategyQuery = `SELECT
+      strategy,
+      COUNT(*) AS sample_count,
+      AVG(p95_latency_ms) AS avg_p95_latency_ms,
+      AVG(score) AS avg_score,
+      AVG(hard_gate_passed) AS pass_ratio
+    FROM loadtest_samples
+    WHERE ${whereClause}
+    GROUP BY strategy
+    ORDER BY avg_score DESC, sample_count DESC`;
+
+  const pageRows = await env.DB.prepare(byPageQuery).bind(...params).all<Record<string, unknown>>();
+  const strategyRows = await env.DB
+    .prepare(byStrategyQuery)
+    .bind(...params)
+    .all<Record<string, unknown>>();
+
+  return json(
+    {
+      ok: true,
+      site_id: siteId,
+      count: (pageRows.results ?? []).length,
+      shared_page_profiles: pageRows.results ?? [],
+      strategy_leaderboard: strategyRows.results ?? [],
+    },
+    200,
+  );
+}
+
+async function loadSharedStrategyBonuses(
+  env: Env,
+  siteId: string,
+): Promise<Record<StrategyCandidateInput['strategy'], number>> {
+  const rows = await env.DB.prepare(
+    `SELECT strategy, AVG(p95_latency_ms) AS avg_p95, COUNT(*) AS sample_count
+     FROM loadtest_samples
+     WHERE site_id = ?1 AND hard_gate_passed = 1
+     GROUP BY strategy`,
+  )
+    .bind(siteId)
+    .all<Record<string, unknown>>();
+
+  const results = rows.results ?? [];
+  const empty: Record<StrategyCandidateInput['strategy'], number> = {
+    'edge-balanced': 0,
+    'edge-r2': 0,
+    'origin-disk': 0,
+    'object-cache': 0,
+  };
+
+  if (results.length < 2) {
+    return empty;
+  }
+
+  const parsed = results
+    .map((row) => ({
+      strategy: normalizeStrategy(asString(row.strategy)),
+      avgP95: numberOr(row.avg_p95, Number.NaN),
+      sampleCount: numberOr(row.sample_count, 0),
+    }))
+    .filter((row) => Number.isFinite(row.avgP95));
+
+  if (parsed.length < 2) {
+    return empty;
+  }
+
+  const p95Values = parsed.map((row) => row.avgP95);
+  const minP95 = Math.min(...p95Values);
+  const maxP95 = Math.max(...p95Values);
+  if (Math.abs(maxP95 - minP95) < 1) {
+    return empty;
+  }
+
+  const bonuses = { ...empty };
+  for (const row of parsed) {
+    const normalized = (maxP95 - row.avgP95) / (maxP95 - minP95);
+    const confidence = Math.min(1, row.sampleCount / 40);
+    bonuses[row.strategy] = normalized * confidence * 0.12;
+  }
+  return bonuses;
+}
+
 async function authorizeMutation(
   request: Request,
   env: Env,
@@ -758,7 +1027,11 @@ function withDebugHeaders(response: Response, debugHeaders: Record<string, strin
 function parseBenchmarkPayload(
   rawBody: ArrayBuffer,
 ):
-  | { ok: true; payload: ResolvedBenchmarkPayload }
+  | {
+      ok: true;
+      payload: Required<Pick<BenchmarkRequestPayload, 'site_id' | 'vps_fingerprint' | 'candidates'>> &
+        BenchmarkRequestPayload;
+    }
   | { ok: false; error: string } {
   const parsed = parseJsonObject(rawBody);
   if (!parsed.ok) {
@@ -817,90 +1090,6 @@ function parseBenchmarkPayload(
   };
 }
 
-function buildCandidatesFromSandboxMetrics(body: Record<string, unknown>): StrategyCandidateInput[] {
-  const k6 = asObject(body.k6_summary) ?? asObject(body.k6) ?? {};
-  const lighthouse = asObject(body.lighthouse_summary) ?? asObject(body.lighthouse) ?? {};
-
-  const p50 = clampNumber(k6.p50_latency_ms, 40, 10000, 320);
-  const p95 = clampNumber(k6.p95_latency_ms, 60, 15000, 720);
-  const p99 = clampNumber(k6.p99_latency_ms, 80, 25000, 1400);
-  const failRate = clampNumber(k6.request_fail_rate, 0, 1, 0);
-  const perfScore = clampNumber(lighthouse.performance_score, 0, 1, 0.6);
-  const tbt = clampNumber(lighthouse.total_blocking_time_ms, 0, 10000, 300);
-
-  const baseOriginCpu = clampNumber(body.origin_cpu_pct, 1, 100, 30 + (1 - perfScore) * 55);
-  const baseOriginQueries = clampNumber(body.origin_query_count, 1, 5000, 50 + p95 / 20);
-  const baseEdgeHit = clampNumber(body.edge_hit_ratio, 0, 1, Math.max(0.2, perfScore));
-  const baseR2Hit = clampNumber(body.r2_hit_ratio, 0, 1, Math.max(0.05, baseEdgeHit * 0.35));
-  const basePurgeMttr = clampNumber(body.purge_mttr_ms, 50, 30000, 700 + tbt);
-
-  const gateFailure = failRate > 0.08;
-  const baseTtl = clampInt(body.default_ttl_seconds, 30, 86400, 300);
-
-  return [
-    {
-      strategy: 'edge-balanced',
-      ttl_seconds: baseTtl,
-      metrics: {
-        p50_latency_ms: p50,
-        p95_latency_ms: p95,
-        p99_latency_ms: p99,
-        origin_cpu_pct: baseOriginCpu,
-        origin_query_count: baseOriginQueries,
-        edge_hit_ratio: baseEdgeHit,
-        r2_hit_ratio: baseR2Hit,
-        purge_mttr_ms: basePurgeMttr,
-      },
-      gates: {
-        digest_mismatch: false,
-        personalized_cache_leak: false,
-        purge_within_window: !gateFailure,
-        cache_key_collision: false,
-      },
-    },
-    {
-      strategy: 'edge-r2',
-      ttl_seconds: clampInt(body.edge_r2_ttl_seconds, 30, 86400, Math.round(baseTtl * 1.5)),
-      metrics: {
-        p50_latency_ms: clampNumber(body.edge_r2_p50_latency_ms, 30, 10000, p50 * 0.95),
-        p95_latency_ms: clampNumber(body.edge_r2_p95_latency_ms, 50, 15000, p95 * 0.9),
-        p99_latency_ms: clampNumber(body.edge_r2_p99_latency_ms, 60, 25000, p99 * 0.88),
-        origin_cpu_pct: clampNumber(body.edge_r2_origin_cpu_pct, 1, 100, baseOriginCpu * 0.82),
-        origin_query_count: clampNumber(body.edge_r2_origin_query_count, 1, 5000, baseOriginQueries * 0.78),
-        edge_hit_ratio: clampNumber(body.edge_r2_edge_hit_ratio, 0, 1, Math.min(0.99, baseEdgeHit * 1.08)),
-        r2_hit_ratio: clampNumber(body.edge_r2_r2_hit_ratio, 0, 1, Math.min(0.99, baseR2Hit * 1.2)),
-        purge_mttr_ms: clampNumber(body.edge_r2_purge_mttr_ms, 50, 30000, basePurgeMttr * 0.95),
-      },
-      gates: {
-        digest_mismatch: false,
-        personalized_cache_leak: false,
-        purge_within_window: !gateFailure,
-        cache_key_collision: false,
-      },
-    },
-    {
-      strategy: 'origin-disk',
-      ttl_seconds: clampInt(body.origin_disk_ttl_seconds, 30, 86400, Math.round(baseTtl * 0.6)),
-      metrics: {
-        p50_latency_ms: clampNumber(body.origin_disk_p50_latency_ms, 40, 10000, p50 * 1.08),
-        p95_latency_ms: clampNumber(body.origin_disk_p95_latency_ms, 60, 15000, p95 * 1.15),
-        p99_latency_ms: clampNumber(body.origin_disk_p99_latency_ms, 80, 25000, p99 * 1.2),
-        origin_cpu_pct: clampNumber(body.origin_disk_origin_cpu_pct, 1, 100, baseOriginCpu * 1.2),
-        origin_query_count: clampNumber(body.origin_disk_origin_query_count, 1, 5000, baseOriginQueries * 1.25),
-        edge_hit_ratio: clampNumber(body.origin_disk_edge_hit_ratio, 0, 1, baseEdgeHit * 0.8),
-        r2_hit_ratio: clampNumber(body.origin_disk_r2_hit_ratio, 0, 1, baseR2Hit * 0.7),
-        purge_mttr_ms: clampNumber(body.origin_disk_purge_mttr_ms, 50, 30000, basePurgeMttr * 1.08),
-      },
-      gates: {
-        digest_mismatch: false,
-        personalized_cache_leak: false,
-        purge_within_window: !gateFailure,
-        cache_key_collision: false,
-      },
-    },
-  ];
-}
-
 function normalizeCandidate(input: unknown): StrategyCandidateInput | null {
   if (!input || typeof input !== 'object') {
     return null;
@@ -950,6 +1139,36 @@ function asString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function asBool(value: unknown): boolean {
+  if (typeof value === 'boolean') {
+    return value;
+  }
+  if (typeof value === 'number') {
+    return value !== 0;
+  }
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase();
+    return v === '1' || v === 'true' || v === 'yes' || v === 'on';
+  }
+  return false;
+}
+
+function derivePagePath(urlValue: string, fallbackPath: string): string {
+  if (fallbackPath) {
+    return fallbackPath.startsWith('/') ? fallbackPath : `/${fallbackPath}`;
+  }
+  if (!urlValue) {
+    return '';
+  }
+  try {
+    const url = new URL(urlValue);
+    const path = url.pathname || '/';
+    return path.startsWith('/') ? path : `/${path}`;
+  } catch {
+    return '';
+  }
+}
+
 function normalizeStrategy(value: string): StrategyCandidateInput['strategy'] {
   const v = value.trim().toLowerCase();
   if (v === 'edge-r2' || v === 'origin-disk' || v === 'object-cache') {
@@ -969,21 +1188,6 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
 function numberOr(value: unknown, fallback: number): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
-}
-
-function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
-  const n = Number(value);
-  if (!Number.isFinite(n)) {
-    return fallback;
-  }
-  return Math.max(min, Math.min(max, n));
-}
-
-function asObject(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
 }
 
 function hashSiteId(input: string): string {

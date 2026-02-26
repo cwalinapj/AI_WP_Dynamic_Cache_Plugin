@@ -91,3 +91,31 @@ CREATE TABLE IF NOT EXISTS sandbox_conflicts (
 
 CREATE INDEX IF NOT EXISTS idx_sandbox_conflicts_plugin_status_created
   ON sandbox_conflicts (plugin_id, status, created_at);
+
+CREATE TABLE IF NOT EXISTS loadtest_samples (
+  id TEXT PRIMARY KEY,
+  plugin_id TEXT NOT NULL,
+  site_id TEXT NOT NULL,
+  worker_id TEXT NOT NULL,
+  page_url TEXT NOT NULL,
+  page_path TEXT NOT NULL,
+  strategy TEXT NOT NULL,
+  p50_latency_ms REAL NOT NULL,
+  p95_latency_ms REAL NOT NULL,
+  p99_latency_ms REAL NOT NULL,
+  origin_cpu_pct REAL NOT NULL,
+  origin_query_count REAL NOT NULL,
+  edge_hit_ratio REAL NOT NULL,
+  r2_hit_ratio REAL,
+  purge_mttr_ms REAL NOT NULL,
+  hard_gate_passed INTEGER NOT NULL,
+  hard_gate_failures_json TEXT,
+  score REAL NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_loadtest_samples_site_path_created
+  ON loadtest_samples (site_id, page_path, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_loadtest_samples_site_strategy_created
+  ON loadtest_samples (site_id, strategy, created_at DESC);

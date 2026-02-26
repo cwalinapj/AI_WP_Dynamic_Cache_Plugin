@@ -1,0 +1,15 @@
+name = "ai-wp-dynamic-cache-worker"
+main = "src/index.ts"
+compatibility_date = "2026-02-26"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai_wp_dynamic_cache"
+database_id = "replace-with-your-d1-id"
+
+[[r2_buckets]]
+binding = "CACHE_R2"
+bucket_name = "ai-wp-cache"
+
+[vars]
+REPLAY_WINDOW_SECONDS = "300"
