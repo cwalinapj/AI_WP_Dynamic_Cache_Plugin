@@ -1,0 +1,19 @@
+# Node
+node_modules/
+apps/control-plane-worker/node_modules/
+
+# Wrangler
+.wrangler/
+
+# Composer
+vendor/
+apps/webadmin-edge-agent/vendor/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
+
+# WP-Env runtime
+.wp-env/
