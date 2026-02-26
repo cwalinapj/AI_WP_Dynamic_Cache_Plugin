@@ -1,0 +1,32 @@
+strategies:
+  - name: disk_only
+    description: Origin disk cache only, no edge caching
+    config:
+      edge_cache: false
+      r2_cache: false
+      disk_cache: true
+      object_cache: false
+
+  - name: disk_edge
+    description: Origin disk cache + Cloudflare edge cache
+    config:
+      edge_cache: true
+      r2_cache: false
+      disk_cache: true
+      object_cache: false
+
+  - name: disk_r2
+    description: Origin disk + R2 fallback, no edge TTL
+    config:
+      edge_cache: false
+      r2_cache: true
+      disk_cache: true
+      object_cache: true
+
+  - name: full
+    description: Full stack - disk + R2 + edge cache
+    config:
+      edge_cache: true
+      r2_cache: true
+      disk_cache: true
+      object_cache: true

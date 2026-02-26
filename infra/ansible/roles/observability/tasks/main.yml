@@ -1,0 +1,147 @@
+---
+# roles/observability/tasks/main.yml
+# Set up Prometheus node exporter, log forwarding, and Grafana dashboards.
+
+# ---------------------------------------------------------------------------
+# Prometheus Node Exporter
+# ---------------------------------------------------------------------------
+- name: Create prometheus user
+  ansible.builtin.user:
+    name: prometheus
+    system: true
+    shell: /sbin/nologin
+    create_home: false
+
+- name: Download Prometheus node exporter
+  ansible.builtin.get_url:
+    url: "https://github.com/prometheus/node_exporter/releases/download/v{{ node_exporter_version | default('1.7.0') }}/node_exporter-{{ node_exporter_version | default('1.7.0') }}.linux-amd64.tar.gz"
+    dest: /tmp/node_exporter.tar.gz
+    mode: "0644"
+
+- name: Extract node exporter
+  ansible.builtin.unarchive:
+    src: /tmp/node_exporter.tar.gz
+    dest: /tmp/
+    remote_src: true
+
+- name: Install node exporter binary
+  ansible.builtin.copy:
+    src: "/tmp/node_exporter-{{ node_exporter_version | default('1.7.0') }}.linux-amd64/node_exporter"
+    dest: /usr/local/bin/node_exporter
+    owner: prometheus
+    group: prometheus
+    mode: "0755"
+    remote_src: true
+
+- name: Deploy node exporter systemd service
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/node_exporter.service
+    content: |
+      [Unit]
+      Description=Prometheus Node Exporter
+      After=network.target
+
+      [Service]
+      User=prometheus
+      Group=prometheus
+      Type=simple
+      ExecStart=/usr/local/bin/node_exporter
+      Restart=on-failure
+
+      [Install]
+      WantedBy=multi-user.target
+    mode: "0644"
+  notify:
+    - Reload systemd
+    - Restart node exporter
+
+- name: Enable and start node exporter
+  ansible.builtin.service:
+    name: node_exporter
+    state: started
+    enabled: true
+
+# ---------------------------------------------------------------------------
+# Vector (log forwarding)
+# ---------------------------------------------------------------------------
+- name: Install Vector for log forwarding
+  ansible.builtin.shell: |
+    curl -1sLf 'https://repositories.timber.io/public/vector/cfg/setup/bash.deb.sh' | bash
+    apt-get install -y vector
+  args:
+    creates: /usr/bin/vector
+
+- name: Deploy Vector configuration
+  ansible.builtin.template:
+    src: vector.toml.j2
+    dest: /etc/vector/vector.toml
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart Vector
+
+- name: Enable and start Vector
+  ansible.builtin.service:
+    name: vector
+    state: started
+    enabled: true
+
+# ---------------------------------------------------------------------------
+# Grafana dashboard
+# ---------------------------------------------------------------------------
+- name: Ensure Grafana provisioning directory exists
+  ansible.builtin.file:
+    path: /etc/grafana/provisioning/dashboards
+    state: directory
+    mode: "0755"
+
+- name: Deploy cache metrics Grafana dashboard
+  ansible.builtin.template:
+    src: grafana-cache-dashboard.json.j2
+    dest: /etc/grafana/provisioning/dashboards/ai-wp-cache.json
+    owner: root
+    group: root
+    mode: "0644"
+  when: grafana_enabled | default(false)
+
+# ---------------------------------------------------------------------------
+# Log rotation
+# ---------------------------------------------------------------------------
+- name: Configure log rotation for Nginx
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/nginx-wp
+    content: |
+      /var/log/nginx/*.log {
+          daily
+          missingok
+          rotate 14
+          compress
+          delaycompress
+          notifempty
+          create 0640 www-data adm
+          sharedscripts
+          postrotate
+              if [ -f /var/run/nginx.pid ]; then
+                  kill -USR1 $(cat /var/run/nginx.pid)
+              fi
+          endscript
+      }
+    mode: "0644"
+
+- name: Configure log rotation for PHP-FPM
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/php-fpm-wp
+    content: |
+      /var/log/php8.2-fpm.log {
+          weekly
+          missingok
+          rotate 8
+          compress
+          delaycompress
+          notifempty
+          create 0640 root adm
+          postrotate
+              systemctl reload php8.2-fpm > /dev/null 2>&1 || true
+          endscript
+      }
+    mode: "0644"

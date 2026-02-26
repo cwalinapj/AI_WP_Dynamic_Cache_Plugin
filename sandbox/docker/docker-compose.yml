@@ -1,0 +1,108 @@
+version: "3.9"
+
+services:
+  wordpress:
+    image: wordpress:6.4-fpm
+    environment:
+      WORDPRESS_DB_HOST: db
+      WORDPRESS_DB_USER: wordpress
+      WORDPRESS_DB_PASSWORD: wordpress
+      WORDPRESS_DB_NAME: wordpress
+      WP_DEBUG: "true"
+      REDIS_HOST: redis
+      WORKER_URL: ""
+      HMAC_SECRET: ""
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    volumes:
+      - wordpress_uploads:/var/www/html/wp-content/uploads
+      - ./wordpress/wp-config.php.template:/var/www/html/wp-config.php.template:ro
+    networks:
+      - cache-bench
+    restart: unless-stopped
+
+  db:
+    image: mysql:8.0
+    environment:
+      MYSQL_DATABASE: wordpress
+      MYSQL_USER: wordpress
+      MYSQL_PASSWORD: wordpress
+      MYSQL_ROOT_PASSWORD: rootpassword
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - cache-bench
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uwordpress", "-pwordpress"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    networks:
+      - cache-bench
+    restart: unless-stopped
+
+  nginx:
+    build:
+      context: ./nginx
+      dockerfile: Dockerfile
+    ports:
+      - "8080:80"
+    depends_on:
+      - wordpress
+    volumes:
+      - wordpress_uploads:/var/www/html/wp-content/uploads:ro
+    networks:
+      - cache-bench
+    restart: unless-stopped
+
+  worker:
+    image: node:20-alpine
+    working_dir: /worker
+    command: ["npm", "run", "dev"]
+    volumes:
+      - ../../workers:/worker
+    networks:
+      - cache-bench
+    restart: unless-stopped
+
+  k6:
+    image: grafana/k6
+    networks:
+      - cache-bench
+    environment:
+      BASE_URL: http://nginx
+    volumes:
+      - ./tools/k6:/scripts
+      - ../../sandbox/results:/results
+    profiles:
+      - testing
+
+  lighthouse:
+    image: node:20
+    working_dir: /lighthouse
+    command: ["node", "run.js"]
+    networks:
+      - cache-bench
+    environment:
+      BASE_URL: http://nginx
+    volumes:
+      - ./tools/lighthouse:/lighthouse
+      - ../../sandbox/results:/results
+    profiles:
+      - testing
+
+networks:
+  cache-bench:
+    driver: bridge
+
+volumes:
+  db_data:
+  wordpress_uploads:
