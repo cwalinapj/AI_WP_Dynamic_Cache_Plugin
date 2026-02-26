@@ -1,0 +1,46 @@
+name = "ai-wp-dynamic-cache"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+[vars]
+ENVIRONMENT = "production"
+
+[[kv_namespaces]]
+binding = "CACHE_TAGS"
+id = "REPLACE_WITH_PRODUCTION_KV_ID"
+preview_id = "REPLACE_WITH_PREVIEW_KV_ID"
+
+[[r2_buckets]]
+binding = "CACHE_BUCKET"
+bucket_name = "ai-wp-cache"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "ai-wp-dynamic-cache-db"
+database_id = "REPLACE_WITH_D1_DATABASE_ID"
+
+[[durable_objects.bindings]]
+name = "SITE_LOCK"
+class_name = "SiteLock"
+
+[[migrations]]
+tag = "v1"
+new_classes = ["SiteLock"]
+
+[[queues.producers]]
+binding = "PURGE_QUEUE"
+queue = "ai-wp-purge-queue"
+
+[[queues.producers]]
+binding = "PRELOAD_QUEUE"
+queue = "ai-wp-preload-queue"
+
+[[queues.consumers]]
+queue = "ai-wp-purge-queue"
+max_batch_size = 50
+max_batch_timeout = 5
+
+[[queues.consumers]]
+queue = "ai-wp-preload-queue"
+max_batch_size = 20
+max_batch_timeout = 10
