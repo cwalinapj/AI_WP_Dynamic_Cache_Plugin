@@ -8,7 +8,7 @@ import { purgeR2ByTag } from '../cache/r2Cache';
 import { purgeFromEdgeCache } from '../cache/edgeCache';
 import { getKeysForTag } from '../cache/tags';
 import { planPreload } from '../preload/planner';
-import { runPreloadJobs } from '../preload/runner';
+import { executePreloadsEagerly } from '../preload/runner';
 
 // ---------------------------------------------------------------------------
 // Message type contracts
@@ -87,7 +87,7 @@ export async function handlePreloadQueue(
 ): Promise<void> {
   // Merge and deduplicate URLs across the whole batch
   const urlSet = new Set<string>();
-  let lowestPriority: 'high' | 'normal' | 'low' = 'low';
+  let highestPriority: 'high' | 'normal' | 'low' = 'low';
 
   const priorityRank: Record<string, number> = { high: 2, normal: 1, low: 0 };
 
@@ -96,22 +96,17 @@ export async function handlePreloadQueue(
       urlSet.add(url);
     }
     const p = msg.body.priority;
-    if ((priorityRank[p] ?? 0) > (priorityRank[lowestPriority] ?? 0)) {
-      lowestPriority = p as 'high' | 'normal' | 'low';
+    if ((priorityRank[p] ?? 0) > (priorityRank[highestPriority] ?? 0)) {
+      highestPriority = p as 'high' | 'normal' | 'low';
     }
   }
 
-  const jobs = planPreload([...urlSet], lowestPriority);
+  const jobs = planPreload([...urlSet], highestPriority);
 
-  // ExecutionContext is not available inside a queue handler, so we run
-  // preloads eagerly rather than via waitUntil.
-  const fakeCtx = {
-    waitUntil: (p: Promise<unknown>): void => { void p; },
-    passThroughOnException: (): void => undefined,
-    props: {} as unknown,
-  } as unknown as ExecutionContext;
-
-  runPreloadJobs(jobs, env, fakeCtx);
+  // Queue handlers do not receive an ExecutionContext, so preloads are awaited
+  // directly here. The Cloudflare runtime keeps the handler alive until this
+  // promise settles.
+  await executePreloadsEagerly(jobs, env);
 
   batch.ackAll();
 }

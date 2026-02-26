@@ -29,6 +29,14 @@ export function runPreloadJobs(
   ctx.waitUntil(executePreloads(jobs.slice(0, MAX_URLS_PER_INVOCATION), env));
 }
 
+/**
+ * Eagerly awaits all preload jobs — for use in queue handlers where an
+ * `ExecutionContext` is not available.
+ */
+export async function executePreloadsEagerly(jobs: PreloadJob[], env: Env): Promise<void> {
+  return executePreloads(jobs.slice(0, MAX_URLS_PER_INVOCATION), env);
+}
+
 async function executePreloads(jobs: PreloadJob[], env: Env): Promise<void> {
   // Process in batches of MAX_CONCURRENCY
   for (let i = 0; i < jobs.length; i += MAX_CONCURRENCY) {
