@@ -1,0 +1,79 @@
+---
+# roles/php_fpm/tasks/main.yml
+# Install and configure PHP 8.2 with FPM, OPcache, and performance settings.
+
+- name: Add PHP 8.2 PPA (Ubuntu)
+  ansible.builtin.apt_repository:
+    repo: ppa:ondrej/php
+    state: present
+    update_cache: true
+
+- name: Install PHP 8.2 and extensions
+  ansible.builtin.apt:
+    name:
+      - php8.2
+      - php8.2-fpm
+      - php8.2-mysql
+      - php8.2-xml
+      - php8.2-curl
+      - php8.2-gd
+      - php8.2-mbstring
+      - php8.2-zip
+      - php8.2-intl
+      - php8.2-bcmath
+      - php8.2-redis
+      - php8.2-opcache
+      - php8.2-imagick
+    state: present
+
+- name: Configure PHP-FPM www pool
+  ansible.builtin.template:
+    src: www.conf.j2
+    dest: /etc/php/8.2/fpm/pool.d/www.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart PHP-FPM
+
+- name: Set php.ini performance values
+  ansible.builtin.lineinfile:
+    path: /etc/php/8.2/fpm/php.ini
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  loop:
+    - regexp: '^memory_limit'
+      line: "memory_limit = {{ php_memory_limit | default('256M') }}"
+    - regexp: '^upload_max_filesize'
+      line: "upload_max_filesize = {{ php_upload_max | default('64M') }}"
+    - regexp: '^post_max_size'
+      line: "post_max_size = {{ php_post_max | default('64M') }}"
+    - regexp: '^max_execution_time'
+      line: "max_execution_time = {{ php_max_execution | default('60') }}"
+    - regexp: '^expose_php'
+      line: "expose_php = Off"
+  notify: Restart PHP-FPM
+
+- name: Configure OPcache
+  ansible.builtin.blockinfile:
+    path: /etc/php/8.2/fpm/conf.d/10-opcache.ini
+    marker: "; {mark} ANSIBLE MANAGED – opcache"
+    block: |
+      opcache.enable=1
+      opcache.memory_consumption={{ opcache_memory | default(256) }}
+      opcache.interned_strings_buffer=16
+      opcache.max_accelerated_files=10000
+      opcache.revalidate_freq=60
+      opcache.fast_shutdown=1
+      opcache.enable_cli=0
+      opcache.jit=tracing
+      opcache.jit_buffer_size=64M
+    create: true
+    mode: "0644"
+  notify: Restart PHP-FPM
+
+- name: Enable and start PHP-FPM
+  ansible.builtin.service:
+    name: "php8.2-fpm"
+    state: started
+    enabled: true

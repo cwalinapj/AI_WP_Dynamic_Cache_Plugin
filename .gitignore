@@ -7,3 +7,15 @@ vendor/
 .DS_Store
 *.log
 .wp-env/
+
+# Additional patterns
+*.zip
+wordpress-plugin/composer.lock
+sandbox/results/*.json
+sandbox/results/*.md
+.env
+.env.local
+.idea/
+.vscode/
+*.swp
+Thumbs.db

@@ -1,0 +1,57 @@
+---
+# roles/redis/tasks/main.yml
+# Install and configure Redis for WordPress object caching.
+
+- name: Install redis-server
+  ansible.builtin.apt:
+    name: redis-server
+    state: present
+    update_cache: true
+
+- name: Configure Redis memory limit and eviction policy
+  ansible.builtin.lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    state: present
+  loop:
+    - regexp: '^#?maxmemory '
+      line: "maxmemory {{ redis_maxmemory | default('128mb') }}"
+    - regexp: '^#?maxmemory-policy '
+      line: "maxmemory-policy {{ redis_eviction_policy | default('allkeys-lru') }}"
+    - regexp: '^#?bind '
+      line: "bind 127.0.0.1 ::1"
+    - regexp: '^#?protected-mode '
+      line: "protected-mode yes"
+  notify: Restart Redis
+
+- name: Enable and start redis-server
+  ansible.builtin.service:
+    name: redis-server
+    state: started
+    enabled: true
+
+- name: Install php-redis extension
+  ansible.builtin.apt:
+    name: php8.2-redis
+    state: present
+  notify: Restart PHP-FPM
+
+- name: Install WordPress Redis Object Cache plugin
+  ansible.builtin.command:
+    cmd: >
+      wp plugin install redis-cache
+      --path={{ wordpress_root }}
+      --activate
+      --allow-root
+  changed_when: true
+  become_user: www-data
+
+- name: Enable Redis object cache drop-in
+  ansible.builtin.command:
+    cmd: >
+      wp redis enable
+      --path={{ wordpress_root }}
+      --allow-root
+  changed_when: true
+  become_user: www-data

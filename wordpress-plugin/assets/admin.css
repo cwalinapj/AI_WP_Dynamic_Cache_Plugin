@@ -1,0 +1,205 @@
+/* =============================================================================
+   AI WP Dynamic Cache – Admin Styles
+   ============================================================================= */
+
+/* Brand colours */
+:root {
+    --aiwpc-blue:       #0073aa;
+    --aiwpc-blue-dark:  #005177;
+    --aiwpc-blue-light: #e8f4fb;
+    --aiwpc-green:      #00a32a;
+    --aiwpc-yellow:     #dba617;
+    --aiwpc-red:        #d63638;
+    --aiwpc-grey:       #50575e;
+    --aiwpc-border:     #c3c4c7;
+    --aiwpc-bg:         #f6f7f7;
+}
+
+/* Wrapper */
+.aiwpc-wrap {
+    max-width: 1200px;
+}
+
+.aiwpc-wrap h1 {
+    color: var(--aiwpc-blue-dark);
+    border-bottom: 2px solid var(--aiwpc-blue);
+    padding-bottom: .4em;
+    margin-bottom: 1.2em;
+}
+
+/* =============================================================================
+   Stat cards
+   ============================================================================= */
+.aiwpc-cards {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 1.5em;
+}
+
+.aiwpc-card {
+    background: #fff;
+    border: 1px solid var(--aiwpc-border);
+    border-radius: 4px;
+    padding: 16px 20px;
+    min-width: 180px;
+    flex: 1 1 180px;
+}
+
+.aiwpc-card h3 {
+    margin: 0 0 .5em;
+    font-size: .9em;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--aiwpc-grey);
+}
+
+.aiwpc-stat {
+    font-size: 2em;
+    font-weight: 700;
+    color: var(--aiwpc-blue-dark);
+}
+
+/* =============================================================================
+   Badges
+   ============================================================================= */
+.aiwpc-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 12px;
+    font-size: .85em;
+    font-weight: 600;
+}
+
+.aiwpc-badge--green  { background: #edfaef; color: var(--aiwpc-green); border: 1px solid #b8e6be; }
+.aiwpc-badge--yellow { background: #fef8ee; color: var(--aiwpc-yellow); border: 1px solid #f5d679; }
+.aiwpc-badge--red    { background: #fef2f2; color: var(--aiwpc-red);   border: 1px solid #f9b8b8; }
+
+/* =============================================================================
+   Log level labels
+   ============================================================================= */
+.aiwpc-level {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: .8em;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.aiwpc-level--debug { background: #f0f0f1; color: var(--aiwpc-grey); }
+.aiwpc-level--info  { background: var(--aiwpc-blue-light); color: var(--aiwpc-blue-dark); }
+.aiwpc-level--warn  { background: #fef8ee; color: var(--aiwpc-yellow); }
+.aiwpc-level--error { background: #fef2f2; color: var(--aiwpc-red); }
+
+/* =============================================================================
+   Action buttons & inline results
+   ============================================================================= */
+.aiwpc-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 1.5em;
+    flex-wrap: wrap;
+}
+
+.aiwpc-inline-result {
+    font-size: .9em;
+}
+
+.aiwpc-result--ok    { color: var(--aiwpc-green); }
+.aiwpc-result--error { color: var(--aiwpc-red); }
+
+/* =============================================================================
+   Log & strategy tables
+   ============================================================================= */
+.aiwpc-log-table,
+.aiwpc-strategy-table,
+.aiwpc-metrics-table {
+    margin-top: .8em;
+    border-collapse: collapse;
+    width: 100%;
+}
+
+.aiwpc-log-table th,
+.aiwpc-log-table td,
+.aiwpc-strategy-table th,
+.aiwpc-strategy-table td,
+.aiwpc-metrics-table th,
+.aiwpc-metrics-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--aiwpc-border);
+    text-align: left;
+    vertical-align: top;
+}
+
+.aiwpc-log-table thead th,
+.aiwpc-strategy-table thead th,
+.aiwpc-metrics-table thead th {
+    background: var(--aiwpc-bg);
+    font-weight: 600;
+    color: var(--aiwpc-grey);
+    font-size: .85em;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.aiwpc-log-table tbody tr:hover,
+.aiwpc-strategy-table tbody tr:hover {
+    background: var(--aiwpc-blue-light);
+}
+
+.aiwpc-strategy-table .aiwpc-row--active {
+    background: var(--aiwpc-blue-light);
+}
+
+.aiwpc-log-table code {
+    font-size: .85em;
+    word-break: break-all;
+}
+
+/* =============================================================================
+   Log controls toolbar
+   ============================================================================= */
+.aiwpc-log-controls {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 1em;
+    padding: 10px 14px;
+    background: #fff;
+    border: 1px solid var(--aiwpc-border);
+    border-radius: 4px;
+}
+
+/* =============================================================================
+   Responsive
+   ============================================================================= */
+@media screen and (max-width: 782px) {
+    .aiwpc-cards {
+        flex-direction: column;
+    }
+
+    .aiwpc-card {
+        min-width: 100%;
+    }
+
+    .aiwpc-actions {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .aiwpc-log-table thead {
+        display: none;
+    }
+
+    .aiwpc-log-table tbody td {
+        display: block;
+        padding: 4px 12px;
+    }
+
+    .aiwpc-log-table tbody td::before {
+        content: attr(data-label) ': ';
+        font-weight: 600;
+    }
+}

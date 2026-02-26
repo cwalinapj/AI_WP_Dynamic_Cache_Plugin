@@ -1,0 +1,87 @@
+---
+# roles/nginx/tasks/main.yml
+# Install and configure Nginx with FastCGI caching and SSL.
+
+- name: Install Nginx
+  ansible.builtin.apt:
+    name:
+      - nginx
+      - certbot
+      - python3-certbot-nginx
+    state: present
+    update_cache: true
+
+- name: Ensure Nginx cache directory exists
+  ansible.builtin.file:
+    path: /tmp/nginx_cache
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0750"
+
+- name: Deploy Nginx site configuration from template
+  ansible.builtin.template:
+    src: nginx-wordpress.conf.j2
+    dest: "/etc/nginx/sites-available/{{ nginx_site_name | default('wordpress') }}"
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload Nginx
+
+- name: Enable Nginx site
+  ansible.builtin.file:
+    src: "/etc/nginx/sites-available/{{ nginx_site_name | default('wordpress') }}"
+    dest: "/etc/nginx/sites-enabled/{{ nginx_site_name | default('wordpress') }}"
+    state: link
+  notify: Reload Nginx
+
+- name: Remove default Nginx site
+  ansible.builtin.file:
+    path: /etc/nginx/sites-enabled/default
+    state: absent
+  notify: Reload Nginx
+
+- name: Enable gzip compression in nginx.conf
+  ansible.builtin.blockinfile:
+    path: /etc/nginx/nginx.conf
+    marker: "# {mark} ANSIBLE MANAGED – gzip"
+    insertafter: "http {"
+    block: |
+      gzip on;
+      gzip_vary on;
+      gzip_proxied any;
+      gzip_comp_level 6;
+      gzip_types text/plain text/css text/xml application/json application/javascript
+                 application/rss+xml application/atom+xml image/svg+xml;
+  notify: Reload Nginx
+
+- name: Test Nginx configuration
+  ansible.builtin.command: nginx -t
+  changed_when: false
+
+- name: Enable and start Nginx
+  ansible.builtin.service:
+    name: nginx
+    state: started
+    enabled: true
+
+- name: Obtain Let's Encrypt certificate (if domain provided)
+  ansible.builtin.command:
+    cmd: >
+      certbot --nginx
+      -d {{ nginx_domain }}
+      --non-interactive
+      --agree-tos
+      --email {{ certbot_email }}
+      --redirect
+    creates: "/etc/letsencrypt/live/{{ nginx_domain }}/fullchain.pem"
+  when: nginx_domain is defined and certbot_email is defined
+  notify: Reload Nginx
+
+- name: Set up Certbot auto-renewal cron job
+  ansible.builtin.cron:
+    name: "Certbot renewal"
+    minute: "0"
+    hour: "3"
+    job: "certbot renew --quiet --post-hook 'systemctl reload nginx'"
+  when: nginx_domain is defined

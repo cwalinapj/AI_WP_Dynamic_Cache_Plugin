@@ -7,7 +7,18 @@
     "skipLibCheck": true,
     "types": ["@cloudflare/workers-types"],
     "forceConsistentCasingInFileNames": true,
-    "noEmit": true
+    "noEmit": true,
+    "lib": ["ES2022"],
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "outDir": "dist",
+    "rootDir": ".",
+    "resolveJsonModule": true,
+    "esModuleInterop": false,
+    "allowSyntheticDefaultImports": true,
+    "isolatedModules": true
   },
-  "include": ["src/**/*.ts"]
+  "include": ["src/**/*.ts", "tests/**/*.ts"],
+  "exclude": ["node_modules", "dist"]
 }

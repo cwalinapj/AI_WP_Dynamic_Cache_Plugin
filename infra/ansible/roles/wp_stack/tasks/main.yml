@@ -1,0 +1,110 @@
+---
+# roles/wp_stack/tasks/main.yml
+# Install and configure a full WordPress stack.
+
+- name: Add PHP 8.2 PPA
+  ansible.builtin.apt_repository:
+    repo: ppa:ondrej/php
+    state: present
+    update_cache: true
+
+- name: Install PHP 8.2 and required extensions
+  ansible.builtin.apt:
+    name:
+      - php8.2
+      - php8.2-fpm
+      - php8.2-mysql
+      - php8.2-xml
+      - php8.2-curl
+      - php8.2-gd
+      - php8.2-mbstring
+      - php8.2-zip
+      - php8.2-intl
+      - php8.2-bcmath
+      - php8.2-redis
+      - php8.2-opcache
+    state: present
+
+- name: Install Nginx
+  ansible.builtin.apt:
+    name: nginx
+    state: present
+
+- name: Install MySQL client tools
+  ansible.builtin.apt:
+    name:
+      - mysql-client
+      - python3-pymysql
+    state: present
+
+- name: Install WP-CLI
+  ansible.builtin.get_url:
+    url: https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
+    dest: /usr/local/bin/wp
+    mode: "0755"
+    checksum: "sha512:{{ wp_cli_checksum | default(omit) }}"
+
+- name: Create WordPress document root
+  ansible.builtin.file:
+    path: "{{ wordpress_root }}"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0755"
+
+- name: Download WordPress core
+  ansible.builtin.command:
+    cmd: >
+      wp core download
+      --path={{ wordpress_root }}
+      --locale={{ wordpress_locale | default('en_US') }}
+      --allow-root
+    creates: "{{ wordpress_root }}/wp-login.php"
+
+- name: Deploy wp-config.php from template
+  ansible.builtin.template:
+    src: wp-config.php.j2
+    dest: "{{ wordpress_root }}/wp-config.php"
+    owner: www-data
+    group: www-data
+    mode: "0640"
+
+- name: Install WordPress (if not already installed)
+  ansible.builtin.command:
+    cmd: >
+      wp core install
+      --path={{ wordpress_root }}
+      --url={{ wordpress_url }}
+      --title="{{ wordpress_title }}"
+      --admin_user={{ wordpress_admin_user }}
+      --admin_password={{ wordpress_admin_password }}
+      --admin_email={{ wordpress_admin_email }}
+      --allow-root
+  register: wp_install
+  changed_when: "'WordPress installed successfully' in wp_install.stdout"
+
+- name: Install AI WP Dynamic Cache plugin
+  ansible.builtin.copy:
+    src: "{{ plugin_source_path }}"
+    dest: "{{ wordpress_root }}/wp-content/plugins/ai-wp-dynamic-cache/"
+    owner: www-data
+    group: www-data
+    mode: "0644"
+    directory_mode: "0755"
+
+- name: Activate AI WP Dynamic Cache plugin
+  ansible.builtin.command:
+    cmd: >
+      wp plugin activate ai-wp-dynamic-cache
+      --path={{ wordpress_root }}
+      --allow-root
+  changed_when: true
+
+- name: Ensure uploads directory exists with correct ownership
+  ansible.builtin.file:
+    path: "{{ wordpress_root }}/wp-content/uploads"
+    state: directory
+    owner: www-data
+    group: www-data
+    mode: "0755"
+    recurse: true
