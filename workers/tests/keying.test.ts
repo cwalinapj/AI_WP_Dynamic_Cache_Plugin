@@ -6,7 +6,9 @@ describe('buildCacheKey', () => {
     // URL constructor always lowercases the scheme, but we verify the contract
     const req = new Request('https://Example.COM/page');
     const key = buildCacheKey(req);
-    expect(key.startsWith('https://example.com')).toBe(true);
+    const parsed = new URL(key);
+    expect(parsed.protocol).toBe('https:');
+    expect(parsed.hostname).toBe('example.com');
   });
 
   it('sorts query parameters alphabetically', () => {
