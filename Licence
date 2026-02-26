@@ -1,0 +1,61 @@
+---
+
+# docs you should include (short but crisp)
+
+## `docs/cache-contract.md`
+Define exactly what headers and signals mean:
+
+- `Cache-Control: public, s-maxage=600, stale-while-revalidate=60`
+- `Cache-Tag: post:123,term:45,frontpage`
+- `X-Content-Digest: sha256:...`
+- `X-AI-Cacheable: 0|1` (optional)
+
+And define Worker behavior for each.
+
+## `docs/sandbox-benchmarking.md`
+Explain:
+- strategy matrix inputs
+- test sequence
+- scoring function
+- promotion/rollback
+
+---
+
+# The “strategy matrix” you should formalize
+
+Create `sandbox/strategies/strategy_matrix.yaml` like:
+
+```yaml
+strategies:
+  - id: edge_html_basic
+    description: "Edge HTML cache for guests; no R2"
+    edge_cache: true
+    r2_durable: false
+    ttl_s: 600
+    swr_s: 60
+    vary:
+      device: false
+      lang: false
+
+  - id: edge_plus_r2_top_pages
+    description: "Edge HTML + R2 durable only for hot URLs"
+    edge_cache: true
+    r2_durable: "hot_only"
+    hot_threshold:
+      hits_10m: 25
+    ttl_s: 900
+    swr_s: 120
+    vary:
+      device: true
+      lang: false
+
+  - id: conservative_origin_disk
+    description: "Short edge cache; rely on NVMe disk cache at origin"
+    edge_cache: true
+    r2_durable: false
+    ttl_s: 120
+    swr_s: 30
+    origin_disk_cache: true
+    vary:
+      device: false
+      lang: false
