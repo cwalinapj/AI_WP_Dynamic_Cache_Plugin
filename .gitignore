@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Build artifacts
+dist/
+*.zip
+
+# WordPress
+wordpress-plugin/composer.lock
+
+# Sandbox results (generated)
+sandbox/results/*.json
+sandbox/results/*.md
+
+# Environment files
+.env
+.env.local
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db

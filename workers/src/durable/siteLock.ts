@@ -116,7 +116,7 @@ export class SiteLock implements DurableObject {
     if (this.timeoutId !== null) clearTimeout(this.timeoutId);
     this.timeoutId = setTimeout(() => {
       this.releaseLock();
-      void this.persist();
+      this.persist().catch((err) => console.error('[SiteLock] auto-release persist failed:', err));
     }, LOCK_TIMEOUT_MS);
   }
 

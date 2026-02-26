@@ -103,7 +103,7 @@ final class Options
     /** Persist the active policy identifier. */
     public function setActivePolicy(string $policy): bool
     {
-        $allowed = ['default', 'disk_only', 'disk_edge', 'r2', 'full'];
+        $allowed = ['default', 'disk_only', 'disk_edge', 'disk_r2', 'full'];
         $policy  = in_array($policy, $allowed, true) ? $policy : 'default';
         return $this->set('active_policy', $policy);
     }
