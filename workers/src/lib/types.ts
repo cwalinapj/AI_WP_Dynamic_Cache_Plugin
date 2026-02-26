@@ -1,7 +1,7 @@
 export interface Env {
   DB: D1Database;
   CACHE_R2?: R2Bucket;
-  WP_PLUGIN_SHARED_SECRET: string;
+  WP_PLUGIN_SHARED_SECRET?: string;
   CAP_TOKEN_SANDBOX_WRITE?: string;
   REPLAY_WINDOW_SECONDS?: string;
   ORIGIN_BASE_URL?: string;

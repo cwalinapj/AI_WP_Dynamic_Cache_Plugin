@@ -7,6 +7,7 @@ import { getPolicyForRequest } from './cache/policy';
 import { getFromEdgeCache, putToEdgeCache } from './cache/edgeCache';
 import { getFromR2, putToR2 } from './cache/r2Cache';
 import { revalidateInBackground, fetchFromOrigin } from './cache/revalidate';
+import { handlePluginApiRequest } from './routes/pluginApi';
 
 // ---------------------------------------------------------------------------
 // Lazy-loaded API handlers (imported inline to keep top-level bundle lean)
@@ -229,6 +230,16 @@ export async function handleRequest(
       return ExperimentsHandler(request, env);
     }
 
+    return Response.json({ error: 'Not found' }, { status: 404 });
+  }
+
+  // --- Plugin API: benchmark scoring, sandbox scheduling, edge cache proxy ---
+  if (
+    pathname.startsWith('/plugin/wp/') ||
+    pathname.startsWith('/edge/cache/')
+  ) {
+    const pluginResponse = await handlePluginApiRequest(request, env);
+    if (pluginResponse) return pluginResponse;
     return Response.json({ error: 'Not found' }, { status: 404 });
   }
 
