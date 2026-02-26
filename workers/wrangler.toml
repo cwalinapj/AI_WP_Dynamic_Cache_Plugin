@@ -2,6 +2,13 @@ name = "ai-wp-dynamic-cache-worker"
 main = "src/index.ts"
 compatibility_date = "2026-02-26"
 
+# NOTE: Before deploying, replace all placeholder IDs below with real values:
+#   - REPLACE_WITH_PRODUCTION_KV_ID  → run: wrangler kv:namespace create "CACHE_TAGS"
+#   - REPLACE_WITH_PREVIEW_KV_ID     → run: wrangler kv:namespace create "CACHE_TAGS" --preview
+#   - REPLACE_WITH_D1_DATABASE_ID    → run: wrangler d1 create ai-wp-dynamic-cache
+# Set secrets via: wrangler secret put WP_PLUGIN_SHARED_SECRET
+#                  wrangler secret put CAP_TOKEN_SANDBOX_WRITE
+
 [vars]
 ENVIRONMENT = "production"
 REPLAY_WINDOW_SECONDS = "300"

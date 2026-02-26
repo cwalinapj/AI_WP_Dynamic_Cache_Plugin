@@ -7,11 +7,15 @@
     "build": "tsc --noEmit",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
+    "lint": "eslint src --ext .ts",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260215.0",
+    "@typescript-eslint/eslint-plugin": "^8.0.0",
+    "@typescript-eslint/parser": "^8.0.0",
+    "eslint": "^8.57.0",
     "typescript": "^5.9.2",
     "vitest": "^1.2.2",
     "wrangler": "^4.35.0"

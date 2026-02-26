@@ -28,7 +28,7 @@ variable "ssh_public_key" {
 }
 
 variable "admin_ips" {
-  description = "List of CIDR ranges allowed to SSH into the server"
+  description = "List of CIDR ranges allowed to SSH into the server. WARNING: The default of [\"0.0.0.0/0\"] exposes SSH to the entire internet and is NOT suitable for production use. Always override this with restricted IP ranges in production."
   type        = list(string)
   default     = ["0.0.0.0/0"]
 }

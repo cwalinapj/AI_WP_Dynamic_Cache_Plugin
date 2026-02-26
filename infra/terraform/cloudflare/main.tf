@@ -14,6 +14,10 @@ provider "cloudflare" {
 # ---------------------------------------------------------------------------
 # Workers Script
 # ---------------------------------------------------------------------------
+# NOTE: This resource requires a pre-built worker bundle.
+# Before running `terraform apply`, build the worker from the workers/ directory:
+#   cd workers && npm run build
+# This generates workers/dist/index.js which is referenced below.
 resource "cloudflare_workers_script" "cache_worker" {
   account_id = var.cloudflare_account_id
   name       = "ai-wp-dynamic-cache-worker"

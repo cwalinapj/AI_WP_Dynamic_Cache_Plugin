@@ -14,7 +14,7 @@ Only the latest stable release and the current development branch (`main`) recei
 
 **Please do not open a public GitHub issue for security vulnerabilities.**
 
-Report security issues by emailing **security@example.com** <!-- TODO: replace with the project's actual security contact email --> with the subject line:
+Report security issues by emailing **security@cwalinapj.dev** or using [GitHub's private vulnerability reporting](https://github.com/cwalinapj/AI_WP_Dynamic_Cache_Plugin/security/advisories/new) with the subject line:
 
 ```
 [SECURITY] AI WP Dynamic Cache Plugin – <brief description>
@@ -28,7 +28,7 @@ Include the following in your report:
 - **Affected versions**: The version(s) you tested against.
 - **Suggested fix** *(optional)*: Any ideas you have about how to address the issue.
 
-If the report involves credentials, keys, or other sensitive material, please use our PGP key (available at `https://example.com/.well-known/security.txt` <!-- TODO: replace with the actual domain -->) to encrypt the message.
+If the report involves credentials, keys, or other sensitive material, please use our PGP key (available at `https://github.com/cwalinapj/AI_WP_Dynamic_Cache_Plugin/blob/main/.well-known/security.txt`) to encrypt the message.
 
 ## Response Timeline
 
@@ -71,4 +71,4 @@ The following are **out of scope**:
 
 ## Security Updates
 
-Security advisories are published via [GitHub Security Advisories](https://github.com/example/AI_WP_Dynamic_Cache_Plugin/security/advisories). <!-- TODO: replace `example/AI_WP_Dynamic_Cache_Plugin` with the actual repository path --> Subscribe to repository notifications to receive alerts.
+Security advisories are published via [GitHub Security Advisories](https://github.com/cwalinapj/AI_WP_Dynamic_Cache_Plugin/security/advisories). Subscribe to repository notifications to receive alerts.
