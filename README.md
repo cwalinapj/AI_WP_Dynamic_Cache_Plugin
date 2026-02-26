@@ -1,7 +1,7 @@
 # WP Admin Plugin Suite
 
 Part of the **AI_WP_Plugin_Family**:
-- Family hub: https://github.com/
+- Family hub: https://github.com/cwalinapj/AI_WP_Plugin_Family
 
 Repository for multiple WordPress plugins and a Cloudflare control plane.
 
