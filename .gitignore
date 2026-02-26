@@ -1,3 +1,9 @@
 dist/
 workers/node_modules/
 sandbox-results/
+node_modules/
+.wrangler/
+vendor/
+.DS_Store
+*.log
+.wp-env/
