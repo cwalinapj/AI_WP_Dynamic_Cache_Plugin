@@ -14,6 +14,7 @@
 - Cloudflare Worker (`workers/src/index.ts`)
   - Verifies signed plugin requests.
   - Evaluates benchmark candidates with hard gates + weighted scoring.
+  - Ingests sandbox metrics (`/plugin/wp/sandbox/metrics/ingest`) to auto-generate benchmark candidates.
   - Persists profile in D1 (`strategy_profiles`).
   - Exposes sandbox queue + conflict endpoints for multi-agent coordination.
   - Executes edge cache chain: Edge Cache API -> R2 -> Origin.

@@ -1,4 +1,4 @@
-mport type { BenchmarkRequestPayload, Env, StrategyCandidateInput } from './lib/types';
+import type { BenchmarkRequestPayload, Env, StrategyCandidateInput } from './lib/types';
 import { evaluateCandidates } from './lib/scoring';
 import { verifySignedRequest } from './lib/signature';
 
@@ -38,7 +38,14 @@ async function handleBenchmark(request: Request, env: Env, path: string): Promis
     return json({ ok: false, error: parsed.error }, 400);
   }
 
-  const result = evaluateCandidates(parsed.payload.candidates);
+  return persistBenchmarkProfile(auth.pluginId, parsed.payload, env);
+}
+
+type ResolvedBenchmarkPayload = Required<Pick<BenchmarkRequestPayload, 'site_id' | 'vps_fingerprint' | 'candidates'>> &
+  BenchmarkRequestPayload;
+
+async function persistBenchmarkProfile(pluginId: string, payload: ResolvedBenchmarkPayload, env: Env): Promise<Response> {
+  const result = evaluateCandidates(payload.candidates);
   const nowIso = new Date().toISOString();
   const chosen = result.recommended;
 
@@ -54,8 +61,6 @@ async function handleBenchmark(request: Request, env: Env, path: string): Promis
   }
 
   const profileId = crypto.randomUUID();
-  const vpsFingerprint = parsed.payload.vps_fingerprint;
-
   await env.DB.prepare(
     `INSERT INTO strategy_profiles (
       id, plugin_id, site_id, vps_fingerprint, strategy, ttl_seconds, score,
@@ -78,9 +83,9 @@ async function handleBenchmark(request: Request, env: Env, path: string): Promis
   )
     .bind(
       profileId,
-      auth.pluginId,
-      parsed.payload.site_id,
-      vpsFingerprint,
+      pluginId,
+      payload.site_id,
+      payload.vps_fingerprint,
       chosen.candidate.strategy,
       chosen.candidate.ttl_seconds,
       chosen.score,
@@ -90,7 +95,7 @@ async function handleBenchmark(request: Request, env: Env, path: string): Promis
       chosen.components.purge_mttr,
       JSON.stringify(chosen.hard_gate_failures),
       JSON.stringify(chosen.candidate.metrics),
-      parsed.payload.ai_summary,
+      payload.ai_summary,
       nowIso,
       nowIso,
     )
@@ -99,8 +104,8 @@ async function handleBenchmark(request: Request, env: Env, path: string): Promis
   return json(
     {
       ok: true,
-      site_id: parsed.payload.site_id,
-      vps_fingerprint: vpsFingerprint,
+      site_id: payload.site_id,
+      vps_fingerprint: payload.vps_fingerprint,
       recommended_strategy: chosen.candidate.strategy,
       ttl_seconds: chosen.candidate.ttl_seconds,
       score: chosen.score,
@@ -144,8 +149,40 @@ async function handleSandbox(request: Request, env: Env, path: string): Promise<
   if (path === '/plugin/wp/sandbox/conflicts/resolve') {
     return handleSandboxConflictResolve(request, env, path);
   }
+  if (path === '/plugin/wp/sandbox/metrics/ingest') {
+    return handleSandboxMetricsIngest(request, env, path);
+  }
 
   return json({ ok: false, error: 'sandbox_route_not_found' }, 404);
+}
+
+async function handleSandboxMetricsIngest(request: Request, env: Env, path: string): Promise<Response> {
+  const auth = await authorizeMutation(request, env, path);
+  if (!auth.ok) {
+    return auth.response;
+  }
+
+  const siteId = asString(auth.body.site_id);
+  if (!siteId) {
+    return json({ ok: false, error: 'missing_site_id' }, 400);
+  }
+
+  const candidates = buildCandidatesFromSandboxMetrics(auth.body);
+  if (candidates.length < 1) {
+    return json({ ok: false, error: 'no_candidates_derived' }, 400);
+  }
+
+  const payload: ResolvedBenchmarkPayload = {
+    site_id: siteId,
+    site_url: asString(auth.body.site_url) || undefined,
+    current_strategy: asString(auth.body.current_strategy) || 'edge-balanced',
+    current_ttl_seconds: clampInt(auth.body.current_ttl_seconds, 30, 86400, 300),
+    ai_summary: asString(auth.body.ai_summary)?.slice(0, 1000),
+    vps_fingerprint: asString(auth.body.vps_fingerprint)?.slice(0, 180) || `vps-${hashSiteId(siteId)}`,
+    candidates,
+  };
+
+  return persistBenchmarkProfile(auth.pluginId, payload, env);
 }
 
 async function handleSandboxRequest(request: Request, env: Env, path: string): Promise<Response> {
@@ -721,11 +758,7 @@ function withDebugHeaders(response: Response, debugHeaders: Record<string, strin
 function parseBenchmarkPayload(
   rawBody: ArrayBuffer,
 ):
-  | {
-      ok: true;
-      payload: Required<Pick<BenchmarkRequestPayload, 'site_id' | 'vps_fingerprint' | 'candidates'>> &
-        BenchmarkRequestPayload;
-    }
+  | { ok: true; payload: ResolvedBenchmarkPayload }
   | { ok: false; error: string } {
   const parsed = parseJsonObject(rawBody);
   if (!parsed.ok) {
@@ -782,6 +815,90 @@ function parseBenchmarkPayload(
       candidates,
     },
   };
+}
+
+function buildCandidatesFromSandboxMetrics(body: Record<string, unknown>): StrategyCandidateInput[] {
+  const k6 = asObject(body.k6_summary) ?? asObject(body.k6) ?? {};
+  const lighthouse = asObject(body.lighthouse_summary) ?? asObject(body.lighthouse) ?? {};
+
+  const p50 = clampNumber(k6.p50_latency_ms, 40, 10000, 320);
+  const p95 = clampNumber(k6.p95_latency_ms, 60, 15000, 720);
+  const p99 = clampNumber(k6.p99_latency_ms, 80, 25000, 1400);
+  const failRate = clampNumber(k6.request_fail_rate, 0, 1, 0);
+  const perfScore = clampNumber(lighthouse.performance_score, 0, 1, 0.6);
+  const tbt = clampNumber(lighthouse.total_blocking_time_ms, 0, 10000, 300);
+
+  const baseOriginCpu = clampNumber(body.origin_cpu_pct, 1, 100, 30 + (1 - perfScore) * 55);
+  const baseOriginQueries = clampNumber(body.origin_query_count, 1, 5000, 50 + p95 / 20);
+  const baseEdgeHit = clampNumber(body.edge_hit_ratio, 0, 1, Math.max(0.2, perfScore));
+  const baseR2Hit = clampNumber(body.r2_hit_ratio, 0, 1, Math.max(0.05, baseEdgeHit * 0.35));
+  const basePurgeMttr = clampNumber(body.purge_mttr_ms, 50, 30000, 700 + tbt);
+
+  const gateFailure = failRate > 0.08;
+  const baseTtl = clampInt(body.default_ttl_seconds, 30, 86400, 300);
+
+  return [
+    {
+      strategy: 'edge-balanced',
+      ttl_seconds: baseTtl,
+      metrics: {
+        p50_latency_ms: p50,
+        p95_latency_ms: p95,
+        p99_latency_ms: p99,
+        origin_cpu_pct: baseOriginCpu,
+        origin_query_count: baseOriginQueries,
+        edge_hit_ratio: baseEdgeHit,
+        r2_hit_ratio: baseR2Hit,
+        purge_mttr_ms: basePurgeMttr,
+      },
+      gates: {
+        digest_mismatch: false,
+        personalized_cache_leak: false,
+        purge_within_window: !gateFailure,
+        cache_key_collision: false,
+      },
+    },
+    {
+      strategy: 'edge-r2',
+      ttl_seconds: clampInt(body.edge_r2_ttl_seconds, 30, 86400, Math.round(baseTtl * 1.5)),
+      metrics: {
+        p50_latency_ms: clampNumber(body.edge_r2_p50_latency_ms, 30, 10000, p50 * 0.95),
+        p95_latency_ms: clampNumber(body.edge_r2_p95_latency_ms, 50, 15000, p95 * 0.9),
+        p99_latency_ms: clampNumber(body.edge_r2_p99_latency_ms, 60, 25000, p99 * 0.88),
+        origin_cpu_pct: clampNumber(body.edge_r2_origin_cpu_pct, 1, 100, baseOriginCpu * 0.82),
+        origin_query_count: clampNumber(body.edge_r2_origin_query_count, 1, 5000, baseOriginQueries * 0.78),
+        edge_hit_ratio: clampNumber(body.edge_r2_edge_hit_ratio, 0, 1, Math.min(0.99, baseEdgeHit * 1.08)),
+        r2_hit_ratio: clampNumber(body.edge_r2_r2_hit_ratio, 0, 1, Math.min(0.99, baseR2Hit * 1.2)),
+        purge_mttr_ms: clampNumber(body.edge_r2_purge_mttr_ms, 50, 30000, basePurgeMttr * 0.95),
+      },
+      gates: {
+        digest_mismatch: false,
+        personalized_cache_leak: false,
+        purge_within_window: !gateFailure,
+        cache_key_collision: false,
+      },
+    },
+    {
+      strategy: 'origin-disk',
+      ttl_seconds: clampInt(body.origin_disk_ttl_seconds, 30, 86400, Math.round(baseTtl * 0.6)),
+      metrics: {
+        p50_latency_ms: clampNumber(body.origin_disk_p50_latency_ms, 40, 10000, p50 * 1.08),
+        p95_latency_ms: clampNumber(body.origin_disk_p95_latency_ms, 60, 15000, p95 * 1.15),
+        p99_latency_ms: clampNumber(body.origin_disk_p99_latency_ms, 80, 25000, p99 * 1.2),
+        origin_cpu_pct: clampNumber(body.origin_disk_origin_cpu_pct, 1, 100, baseOriginCpu * 1.2),
+        origin_query_count: clampNumber(body.origin_disk_origin_query_count, 1, 5000, baseOriginQueries * 1.25),
+        edge_hit_ratio: clampNumber(body.origin_disk_edge_hit_ratio, 0, 1, baseEdgeHit * 0.8),
+        r2_hit_ratio: clampNumber(body.origin_disk_r2_hit_ratio, 0, 1, baseR2Hit * 0.7),
+        purge_mttr_ms: clampNumber(body.origin_disk_purge_mttr_ms, 50, 30000, basePurgeMttr * 1.08),
+      },
+      gates: {
+        digest_mismatch: false,
+        personalized_cache_leak: false,
+        purge_within_window: !gateFailure,
+        cache_key_collision: false,
+      },
+    },
+  ];
 }
 
 function normalizeCandidate(input: unknown): StrategyCandidateInput | null {
@@ -852,6 +969,21 @@ function clampInt(value: unknown, min: number, max: number, fallback: number): n
 function numberOr(value: unknown, fallback: number): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
+  const n = Number(value);
+  if (!Number.isFinite(n)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, n));
+}
+
+function asObject(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
 }
 
 function hashSiteId(input: string): string {
