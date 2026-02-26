@@ -1,4 +1,32 @@
-# AI WP Dynamic Cache Plugin
+# WP Admin Plugin Suite
+
+Part of the **AI_WP_Plugin_Family**:
+- Family hub: https://github.com/cwalinapj/AI_WP_Plugin_Family
+
+Repository for multiple WordPress plugins and a Cloudflare control plane.
+
+This repo is now organized as a multi-product suite (not web3-only):
+- `apps/webadmin-edge-agent`: production WordPress edge agent plugin.
+- `apps/control-plane-worker`: Cloudflare Worker control plane.
+- `plugins/ai-webadmin`: legacy all-in-one AI WebAdmin plugin.
+- `plugins/tolldns`: TollDNS helper plugin.
+
+## Repository layout
+
+```text
+repo/
+  apps/
+    webadmin-edge-agent/
+    control-plane-worker/
+  plugins/
+    ai-webadmin/
+    tolldns/
+  docs/
+  scripts/
+  update-feed/
+```
+
+## Local development
 
 WordPress dynamic cache plugin plus Cloudflare Worker control plane skeleton with sandbox benchmark scoring.
 
